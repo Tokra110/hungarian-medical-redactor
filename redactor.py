@@ -38,8 +38,9 @@ class PiiSpan:
 class FileEvent:
     """Structured per-file progress event for GUI consumers.
 
-    stage: "converting" | "redacting" | "done" | "failed"
-    counts: per-label redaction counts, only set on "done"
+    stage: "converting" | "redacting" | "done" | "partial" | "failed"
+    counts: per-label redaction counts, only set on "done" and "partial"
+    error: why it failed, or on "partial" what is missing from the saved output
     """
 
     path: str
@@ -47,6 +48,14 @@ class FileEvent:
     counts: dict[str, int] | None = None
     output_name: str | None = None
     error: str | None = None
+
+
+class PartialConversionError(RuntimeError):
+    """Docling lost part of a document, and this caller has no way to report it."""
+
+    def __init__(self, problems: list[str]):
+        super().__init__("Incomplete conversion: " + "; ".join(problems))
+        self.problems = problems
 
 
 # --- Regex patterns for Hungarian PII ---
@@ -238,8 +247,30 @@ _BIRTH_CONTEXT_RE = re.compile(
     r"|sz[uü]l\.\s*d[aá]t"
 )
 
+# A caption printed under its value, alone on the next line ("Teszt Elek" above
+# "Beteg neve"). The text reads top to bottom, so the value comes first, and the
+# field rules above only read a label before its value. These are their mirror.
+_CAPTION_BELOW = r"[ \t]*\n\s*(?:[#\-*]+[ \t]*)?"
+_CAPTION_END = r"[ \t]*:?[ \t]*(?=\n|$)"
+# No digits: a line with digits holds a value of its own, so it is no caption.
+_CAPTION_LINE_RE = re.compile(rf"\.?{_CAPTION_BELOW}([^\n\d]{{1,40}}?){_CAPTION_END}")
+_NAME_ABOVE_CAPTION_RE = re.compile(
+    rf"({_HU_FULL_NAME_ANYCASE}){_CAPTION_BELOW}(?i:{_NAME_KEYWORDS}){_CAPTION_END}"
+)
+# A flat pattern on purpose. The nested one in _RECORD_ID_FIELD_RE is safe only
+# behind its label; here it would start on every digit of a lab table.
+_RECORD_ID_ABOVE_CAPTION_RE = re.compile(
+    rf"(?<![\w/–-])([A-Z]?\d[\d /–-]{{2,30}}\d){_CAPTION_BELOW}"
+    rf"(?i:{_RECORD_ID_LABELS}){_CAPTION_END}"
+)
 
-def _is_birth_date(text: str, match_start: int) -> bool:
+
+def _caption_below(text: str, value_end: int) -> str:
+    match = _CAPTION_LINE_RE.match(text, value_end)
+    return match.group(1) if match else ""
+
+
+def _is_birth_date(text: str, match_start: int, match_end: int) -> bool:
     context_start = max(0, match_start - 80)
     context = text[context_start:match_start]
     line_start = text.rfind("\n", 0, match_start) + 1
@@ -252,6 +283,8 @@ def _is_birth_date(text: str, match_start: int) -> bool:
     # still falls through to the wider context window.
     if ":" in line_context:
         return False
+    if _BIRTH_CONTEXT_RE.search(_caption_below(text, match_end)):
+        return True
     return _BIRTH_CONTEXT_RE.search(context) is not None
 
 
@@ -272,7 +305,11 @@ def _find_regex_pii(text: str) -> list[PiiSpan]:
             continue
         context_start = max(0, m.start() - 60)
         context = text[context_start : m.start()]
-        if _validate_taj(m.group(1), m.group(2), m.group(3)) or _TAJ_CONTEXT_RE.search(context):
+        if (
+            _validate_taj(m.group(1), m.group(2), m.group(3))
+            or _TAJ_CONTEXT_RE.search(context)
+            or _TAJ_CONTEXT_RE.search(_caption_below(text, m.end()))
+        ):
             spans.append(PiiSpan(m.start(), m.end(), "TAJ", m.group()))
 
     for m in _PHONE_RE.finditer(text):
@@ -282,11 +319,11 @@ def _find_regex_pii(text: str) -> list[PiiSpan]:
         spans.append(PiiSpan(m.start(), m.end(), "EMAIL", m.group()))
 
     for m in _DATE_NUMERIC_RE.finditer(text):
-        if _is_birth_date(text, m.start()):
+        if _is_birth_date(text, m.start(), m.end()):
             spans.append(PiiSpan(m.start(), m.end(), "DATE_OF_BIRTH", m.group()))
 
     for m in _DATE_TEXT_RE.finditer(text):
-        if _is_birth_date(text, m.start()):
+        if _is_birth_date(text, m.start(), m.end()):
             spans.append(PiiSpan(m.start(), m.end(), "DATE_OF_BIRTH", m.group()))
 
     for m in _ADDRESS_STREET_RE.finditer(text):
@@ -296,7 +333,7 @@ def _find_regex_pii(text: str) -> list[PiiSpan]:
         if not any(s.start <= m.start() and s.end >= m.end() for s in spans):
             spans.append(PiiSpan(m.start(), m.end(), "ADDRESS", m.group()))
 
-    for pattern in (_NAME_FIELD_RE, _NAME_TABLE_RE):
+    for pattern in (_NAME_FIELD_RE, _NAME_TABLE_RE, _NAME_ABOVE_CAPTION_RE):
         for m in pattern.finditer(text):
             name = m.group(1).strip().rstrip(".")
             if name and len(name) > 3:
@@ -336,6 +373,11 @@ def _find_regex_pii(text: str) -> list[PiiSpan]:
 
     for m in _RECORD_ID_FIELD_RE.finditer(text):
         spans.append(PiiSpan(m.start(1), m.end(1), "RECORD_ID", m.group(1)))
+
+    for m in _RECORD_ID_ABOVE_CAPTION_RE.finditer(text):
+        # At least 4 digits so table row numbers survive, as in the field rule.
+        if sum(char.isdigit() for char in m.group(1)) >= 4:
+            spans.append(PiiSpan(m.start(1), m.end(1), "RECORD_ID", m.group(1)))
 
     for m in _RECORD_ID_COMPOSITE_RE.finditer(text):
         spans.append(PiiSpan(m.start(), m.end(), "RECORD_ID", m.group()))
@@ -650,7 +692,31 @@ def _redact_filename_segment(name: str) -> str:
     return name
 
 
+def _conversion_problems(result) -> list[str]:
+    """What Docling could not convert; empty when the result is complete.
+
+    When a stage fails on some pages, Docling drops those pages and returns the
+    rest as PARTIAL_SUCCESS with no exception, so this has to be checked.
+    """
+    from docling.datamodel.base_models import ConversionStatus
+
+    if result.status == ConversionStatus.SUCCESS:
+        return []
+    return [item.error_message for item in result.errors] or [
+        f"Docling status: {result.status.value}"
+    ]
+
+
 def convert_pdf(pdf_path: str, converter) -> str:
+    """The Markdown of a complete conversion. Raises PartialConversionError if not."""
+    markdown, problems = convert_pdf_detailed(pdf_path, converter)
+    if problems:
+        raise PartialConversionError(problems)
+    return markdown
+
+
+def convert_pdf_detailed(pdf_path: str, converter) -> tuple[str, list[str]]:
+    """The Markdown, and what is missing from it (empty when complete)."""
     source = pdf_path
     if _is_windows():
         # docling-parse passes filesystem paths to native code as UTF-8 bytes.
@@ -684,7 +750,10 @@ def convert_pdf(pdf_path: str, converter) -> str:
     _LOGGER.info("Starting Docling conversion with source type %s", type(source).__name__)
     result = converter.convert(source)
     _LOGGER.info("Docling conversion completed")
-    return result.document.export_to_markdown()
+    problems = _conversion_problems(result)
+    if problems:
+        _LOGGER.warning("Incomplete conversion: %s", "; ".join(problems))
+    return result.document.export_to_markdown(), problems
 
 
 # --- Docling loading ---
@@ -784,16 +853,20 @@ def process_file_detailed(
     converter,
     log: Callable[[str], None] | None = None,
     on_stage: Callable[[str], None] | None = None,
-) -> tuple[str, dict[str, int]]:
+) -> tuple[str, dict[str, int], list[str]]:
+    """The redacted text, its per-label counts, and what is missing from it."""
     name = Path(pdf_path).name
     if log:
         log(f"Converting {name}...")
     if on_stage:
         on_stage("converting")
 
-    markdown = _collapse_repeated_table_row_cells(convert_pdf(pdf_path, converter))
+    markdown, problems = convert_pdf_detailed(pdf_path, converter)
+    markdown = _collapse_repeated_table_row_cells(markdown)
 
     if log:
+        if problems:
+            log(f"  WARNING: Incomplete conversion, content is missing: {'; '.join(problems)}")
         log(f"  {len(markdown)} chars extracted. Detecting PII...")
     if on_stage:
         on_stage("redacting")
@@ -813,7 +886,7 @@ def process_file_detailed(
         else:
             log("  WARNING: No PII detected at all")
 
-    return _redact(markdown, merged), _label_count_dict(merged)
+    return _redact(markdown, merged), _label_count_dict(merged), problems
 
 
 def process_file(
@@ -822,7 +895,10 @@ def process_file(
     converter,
     log: Callable[[str], None] | None = None,
 ) -> str:
-    redacted, _counts = process_file_detailed(pdf_path, nlp, converter, log=log)
+    """The redacted text of a complete conversion. Raises PartialConversionError if not."""
+    redacted, _counts, problems = process_file_detailed(pdf_path, nlp, converter, log=log)
+    if problems:
+        raise PartialConversionError(problems)
     return redacted
 
 
@@ -926,6 +1002,7 @@ def process_pdfs(
         log("Models ready.\n")
 
     success = 0
+    incomplete = 0
     # Redacted names can collide (two PDFs from the same date). Uniquify
     # within this run only; overwriting a previous run's output for the same
     # PDF stays intentional so reprocessing is idempotent.
@@ -933,14 +1010,14 @@ def process_pdfs(
     for i, pdf in enumerate(pdfs):
         if stop_event and stop_event.is_set():
             if log:
-                log(f"\nStopped by user after {success} files.")
+                log(f"\nStopped by user after {success + incomplete} files.")
             return
 
         try:
             on_stage = None
             if on_file_event:
                 on_stage = lambda stage, p=str(pdf): on_file_event(FileEvent(path=p, stage=stage))
-            redacted, counts = process_file_detailed(
+            redacted, counts, problems = process_file_detailed(
                 str(pdf), nlp, converter, log=log, on_stage=on_stage
             )
             out_dir = output_path if output_path else pdf.parent
@@ -952,12 +1029,19 @@ def process_pdfs(
                 counter += 1
             used_names.add(out_file)
             out_file.write_text(redacted, encoding="utf-8")
-            success += 1
+            if problems:
+                incomplete += 1
+            else:
+                success += 1
             if log:
                 log(f"  Saved: {out_file.name}\n")
             if on_file_event:
                 on_file_event(FileEvent(
-                    path=str(pdf), stage="done", counts=counts, output_name=out_file.name
+                    path=str(pdf),
+                    stage="partial" if problems else "done",
+                    counts=counts,
+                    output_name=out_file.name,
+                    error="; ".join(problems) or None,
                 ))
         except Exception as e:
             _LOGGER.exception("PDF processing failed: %s", pdf.name)
@@ -970,7 +1054,10 @@ def process_pdfs(
             progress(i + 1, len(pdfs))
 
     if log:
-        log(f"Done. {success}/{len(pdfs)} files processed successfully.")
+        summary = f"Done. {success}/{len(pdfs)} files processed successfully."
+        if incomplete:
+            summary += f" {incomplete} incomplete: saved with content missing, see above."
+        log(summary)
         log(f"Output: {output_path if output_path else 'next to the original PDFs'}")
 
 

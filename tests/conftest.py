@@ -55,8 +55,12 @@ class FakeDoc:
 
 
 class FakeConversion:
-    def __init__(self, markdown: str):
+    def __init__(self, markdown: str, status=None, errors=()):
+        from docling.datamodel.base_models import ConversionStatus
+
         self.document = FakeDoc(markdown)
+        self.status = status or ConversionStatus.SUCCESS
+        self.errors = list(errors)
 
 
 class FakeConverter:

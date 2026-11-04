@@ -26,6 +26,31 @@ class _DisabledChartExtractionModel:
             yield element.item
 
 
+def _same_row(a, b) -> bool:
+    overlap = min(a.t, b.t) - max(a.b, b.b)
+    return a.page_no == b.page_no and overlap > 0.5 * max(a.t - a.b, b.t - b.b)
+
+
+def _sort_top_to_bottom(elements: list) -> list:
+    """Page by page, top to bottom, and left to right inside a row.
+
+    Docling gives bottom-left coordinates, so a larger `t` is higher on the page.
+    Side-by-side boxes rarely share the exact same top, so boxes that overlap by
+    more than half of the taller one count as one row. Without this, a value a
+    point higher than its label comes first and the name rules miss it. Comparing
+    with the taller box keeps a tall box from swallowing a column of short ones.
+    """
+    ordered: list = []
+    row: list = []
+    for element in sorted(elements, key=lambda el: (el.page_no, -el.t, el.l, el.cid)):
+        if row and not _same_row(row[0], element):
+            ordered.extend(sorted(row, key=lambda el: (el.l, el.cid)))
+            row = []
+        row.append(element)
+    ordered.extend(sorted(row, key=lambda el: (el.l, el.cid)))
+    return ordered
+
+
 def install_docling_torch_free_shims() -> None:
     _install_cpu_accelerator_shim()
     _install_chart_extraction_shim()
@@ -98,7 +123,7 @@ def _install_docling_ibm_reading_order_shims() -> None:
 
     class ReadingOrderPredictor:
         def predict_reading_order(self, page_elements):
-            return sorted(page_elements, key=lambda el: (el.page_no, el.t, el.l, el.cid))
+            return _sort_top_to_bottom(page_elements)
 
         def predict_to_captions(self, sorted_elements):
             return {}

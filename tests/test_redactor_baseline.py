@@ -403,3 +403,66 @@ def test_process_pdfs_uniquifies_colliding_output_names(tmp_path, monkeypatch):
         "2025-01-15 - [REDACTED_NAME].md",
         "2025-01-15 - [REDACTED_NAME] (2).md",
     }
+
+
+def _redact_text(markdown, tmp_path):
+    from conftest import EmptyNerPipeline, FakeConverter
+
+    pdf_path = tmp_path / "lelet.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+    return process_file(str(pdf_path), EmptyNerPipeline(), FakeConverter(markdown))
+
+
+def test_value_above_its_caption_is_redacted(tmp_path):
+    redacted = _redact_text(
+        """
+Teszt Elek
+
+## Beteg neve
+
+123 456 789
+
+TAJ szam:
+
+- 1980. 01. 02.
+
+Szuletesi datum
+
+55 001/2021
+
+## Naploszam
+""",
+        tmp_path,
+    )
+
+    for value in ("Teszt Elek", "123 456 789", "1980. 01. 02", "55 001/2021"):
+        assert value not in redacted, redacted
+    for caption in ("Beteg neve", "TAJ szam", "Szuletesi datum", "Naploszam"):
+        assert caption in redacted, redacted
+
+
+def test_line_below_with_its_own_value_is_not_a_caption(tmp_path):
+    # The exam date stays: the birth label below it belongs to the next date.
+    redacted = _redact_text(
+        """
+2026. 07. 05.
+
+Szuletesi datum: 1980. 01. 02.
+
+Vizsgalat datuma: 2026. 03. 04.
+
+Szuletesi datum
+
+9 kg testsuly
+
+Sorszam
+""",
+        tmp_path,
+    )
+
+    assert "2026. 07. 05" in redacted, redacted
+    assert "1980. 01. 02" not in redacted, redacted
+    # A different label on the date's own line wins over a caption below it.
+    assert "2026. 03. 04" in redacted, redacted
+    # Too few digits for a record number: table row numbers must survive.
+    assert "9 kg testsuly" in redacted, redacted

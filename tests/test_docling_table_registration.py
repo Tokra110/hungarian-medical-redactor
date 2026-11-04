@@ -196,3 +196,43 @@ def test_windows_stream_path_converts_unicode_pdf(
     assert "GGT" in markdown
     assert "Na+" in markdown
     assert "|" in markdown
+
+
+def test_failed_table_step_is_reported_as_partial(tmp_path, monkeypatch):
+    # The real pipeline, with the table step failing on page 2 of an invented PDF.
+    # Docling then drops the whole page and returns the rest with no exception.
+    import pytest
+    from docling.datamodel.base_models import InputFormat
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    import redactor
+    from medical_redactor_onnx.docling_table_model import OnnxTableStructureModel
+
+    pdf = tmp_path / "ket-oldal.pdf"
+    pdf_canvas = canvas.Canvas(str(pdf), pagesize=A4)
+    pdf_canvas.drawString(60, 760, "Elso oldal szovege.")
+    pdf_canvas.showPage()
+    pdf_canvas.drawString(60, 760, "Masodik oldal szovege.")
+    pdf_canvas.showPage()
+    pdf_canvas.save()
+
+    real_predict_tables = OnnxTableStructureModel.predict_tables
+
+    def fail_on_page_two(self, conv_res, pages):
+        if any(page.page_no == 2 for page in pages):
+            raise RuntimeError("invented table failure")
+        return real_predict_tables(self, conv_res, pages)
+
+    monkeypatch.setattr(OnnxTableStructureModel, "predict_tables", fail_on_page_two)
+    converter = redactor.build_docling_converter()
+    # One page per batch, so that page 1 is sure to survive.
+    converter.format_to_options[InputFormat.PDF].pipeline_options.table_batch_size = 1
+
+    markdown, problems = redactor.convert_pdf_detailed(str(pdf), converter)
+
+    assert "Elso oldal" in markdown
+    assert "Masodik oldal" not in markdown
+    assert problems == ["Page 2: invented table failure"]
+    with pytest.raises(redactor.PartialConversionError, match="Page 2"):
+        redactor.convert_pdf(str(pdf), converter)

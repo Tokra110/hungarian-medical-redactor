@@ -108,18 +108,22 @@ _STRINGS: dict[str, dict[str, str]] = {
         "hu": (
             "Minden sor egy PDF. Oszlopok:\n"
             "• Fájl — a PDF neve\n"
-            "• Állapot — sorban / átalakítás / felismerés / kész / hiba\n"
+            "• Állapot — sorban / átalakítás / felismerés / kész / hiányos / hiba\n"
             "• Nevek, TAJ, Dátumok, Cím — az egyes PII-típusokból hány lett anonimizálva\n"
             "• Összes — az adott fájl összes anonimizálása.\n"
-            "A nulla nevet tartalmazó sort borostyánszín jelöli — érdemes kézzel ellenőrizni."
+            "A nulla nevet tartalmazó sort borostyánszín jelöli — érdemes kézzel ellenőrizni.\n"
+            "A hiányos sor is borostyánszínű: a kimenetből oldalak hiányoznak, ezért vesd össze "
+            "az eredetivel."
         ),
         "en": (
             "Each row is one PDF. Columns:\n"
             "• File — the PDF name\n"
-            "• Status — queued / converting / detecting / done / error\n"
+            "• Status — queued / converting / detecting / done / incomplete / error\n"
             "• Names, TAJ, Dates, Addr. — how many of each PII type were redacted\n"
             "• Total — all redactions in that file.\n"
-            "A row with zero names is flagged amber — worth a manual check."
+            "A row with zero names is flagged amber — worth a manual check.\n"
+            "An incomplete row is amber too: pages are missing from the output, so compare "
+            "it with the original."
         ),
     },
     # --- footer / run control ---
@@ -319,6 +323,19 @@ _STRINGS: dict[str, dict[str, str]] = {
     "status_converting": {"hu": "Átalakítás…", "en": "Converting…"},
     "status_redacting": {"hu": "Anonimizálás…", "en": "Redacting…"},
     "status_done": {"hu": "Kész", "en": "Done"},
+    "status_partial": {"hu": "Hiányos", "en": "Incomplete"},
+    "partial_tooltip": {
+        "hu": (
+            "A kimenet elkészült, de hiányos: a Docling nem tudott minden oldalt feldolgozni, "
+            "és az elveszett oldalak tartalma nincs a fájlban. Vesd össze az eredeti PDF-fel, "
+            "vagy indítsd újra.\n{detail}"
+        ),
+        "en": (
+            "The output was saved but is incomplete: Docling could not process every page, "
+            "and the content of the lost pages is not in the file. Compare it with the "
+            "original PDF or run it again.\n{detail}"
+        ),
+    },
     "status_failed": {"hu": "Hiba", "en": "Failed"},
     "zero_names": {"hu": "0 név", "en": "0 names"},
     # --- models dialog ---

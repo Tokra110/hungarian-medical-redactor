@@ -23,6 +23,7 @@ _STATUS_KEYS = {
     "converting": "status_converting",
     "redacting": "status_redacting",
     "done": "status_done",
+    "partial": "status_partial",
     "failed": "status_failed",
 }
 
@@ -38,6 +39,10 @@ class FileRow:
     def zero_names(self) -> bool:
         return self.status == "done" and self._sum(_NAME_LABELS) == 0
 
+    @property
+    def needs_review(self) -> bool:
+        return self.zero_names or self.status == "partial"
+
     def _sum(self, labels) -> int:
         return sum(v for k, v in self.counts.items() if k in labels)
 
@@ -49,7 +54,7 @@ class FileRow:
                 return t("zero_names")
             key = _STATUS_KEYS.get(self.status)
             return t(key) if key else self.status
-        if self.status != "done":
+        if self.status not in ("done", "partial"):
             return "–"
         if col == 2:
             return str(self._sum(_NAME_LABELS))
@@ -99,7 +104,8 @@ class QueueModel(QAbstractTableModel):
             self.endRemoveRows()
 
     def pending_paths(self) -> list[str]:
-        return [r.path for r in self._rows if r.status in ("queued", "failed")]
+        # A partial row runs again too: a new run overwrites its incomplete output.
+        return [r.path for r in self._rows if r.status in ("queued", "failed", "partial")]
 
     def row_count_total(self) -> int:
         return len(self._rows)
@@ -151,10 +157,12 @@ class QueueModel(QAbstractTableModel):
             return row.cell(index.column())
         if role == Qt.ToolTipRole and row.status == "failed":
             return row.error
-        if role == Qt.BackgroundRole and row.zero_names:
+        if role == Qt.ToolTipRole and row.status == "partial":
+            return t("partial_tooltip", detail=row.error)
+        if role == Qt.BackgroundRole and row.needs_review:
             return QBrush(QColor(theme.WARN_BG))
         if role == Qt.ForegroundRole:
-            if row.zero_names:
+            if row.needs_review:
                 return QBrush(QColor(theme.WARN_TEXT))
             if row.status == "failed":
                 return QBrush(QColor(theme.FAIL_TEXT))

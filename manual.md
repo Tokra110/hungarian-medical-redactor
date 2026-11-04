@@ -32,7 +32,7 @@ How the redactor works and why. The brief is `AGENTS.md`. There is no session lo
 
 Per file, in `process_file_detailed`:
 
-1. **Convert** the PDF to Markdown with Docling Slim, which keeps tables. Layout runs on Docling's ONNX engine, tables on our ONNX TableFormer, OCR on RapidOCR's ONNX backend (`english` model, enough for Latin text). A note spanning a full table row appears once, not once per cell.
+1. **Convert** the PDF to Markdown with Docling Slim, which keeps tables. Layout runs on Docling's ONNX engine, tables on our ONNX TableFormer, OCR on RapidOCR's ONNX backend (`english` model, enough for Latin text). A note spanning a full table row appears once, not once per cell. Pages read top to bottom (see "Page order"). A partial Docling result is reported, not hidden (see "Partial conversions").
 2. **NER** (`_find_ner_pii`): ONNX HuBERT finds PER, LOC and ORG in 800-character chunks with a 200-character overlap. A second pass, shifted by half a stride, repairs entities cut at chunk edges. Its hits count only within 100 characters of a first-pass boundary; elsewhere they are mostly noise and ate lab analyte names like "Nátrium". Hits under `_NER_MIN_SCORE` (0.7, tuned on the corpus; read the comment before changing it) are dropped.
 3. **Regex** (`_find_regex_pii`): the Hungarian patterns below.
 4. **Noise filter** (`_drop_isolated_midword_spans`): adjacent NER fragments are judged together. A fragment inside one word with no regex support is dropped, so clinical terms like `Par|ath|ormon` survive. Fragmented names stay redacted, including known Hungarian case suffixes.
@@ -46,6 +46,7 @@ Per file, in `process_file_detailed`:
 - **TAJ number:** `\d{3}[-\s]?\d{3}[-\s]?\d{3}` with checksum validation (weights 3,7,3,7,3,7,3,7; mod 10).
 - **Institution codes stay:** 9-digit codes after `NNGYK:` or `NEAK:` often pass the TAJ checksum but identify the lab, not the patient. `_INSTITUTION_CODE_LABEL_RE` suppresses the TAJ match there.
 - **Names by field label:** 30+ Hungarian labels (beteg neve, anyja neve, születési neve ...) with accent-flexible matching (`[eé]`, `[aá]`, `[uü]`). The value can be title case or all caps and can sit on the next line (`_FIELD_SEP` includes `\n`).
+- **Captions under a value:** the field rules read a label before its value, but some forms print the caption under the filled-in value. `_caption_below`, `_NAME_ABOVE_CAPTION_RE` and `_RECORD_ID_ABOVE_CAPTION_RE` read a caption alone on the next line for TAJ numbers, birth dates, names and record IDs. A next line with digits holds its own value, so it never counts as a caption.
 - **Name shape:** `_HU_NAME_PART` is a capitalised Hungarian word, including the married suffix "né". `_HU_FULL_NAME` is 2 to 5 parts joined by spaces, hyphens, dashes or dots.
 - **Other name anchors:** "Dr." before or after a name (`_DR_PREFIX_NAME_RE`, `_DR_SUFFIX_NAME_RE`; no newlines inside, so the next sentence's first word is safe), a clinician title after a name ("<name> Optometrista"), and a name before "részére".
 - **Doctor stamp IDs** (`DOCTOR_ID`): "EESZT: A12345", a bracketed ID after a name, and a bare letter plus 5 digits after a name. The stamp ID is public, so it would identify the redacted doctor.
@@ -57,17 +58,19 @@ Per file, in `process_file_detailed`:
 
 ## Design decisions
 
-- **Only birth dates go:** `_DATE_NUMERIC_RE` and `_DATE_TEXT_RE` redact a date only when `_is_birth_date` finds a birth keyword in the 80 characters before it. Examination dates stay on purpose.
+- **Only birth dates go:** `_DATE_NUMERIC_RE` and `_DATE_TEXT_RE` redact a date only when `_is_birth_date` finds a birth keyword in the 80 characters before it, or in a caption alone on the next line. Examination dates stay on purpose.
 - **All names go, doctors included.**
 - **Logs are safe to share:** `sanitize_log()` in `gui/settings.py` removes file paths and PDF/MD file names. `diagnostics.py` applies it to the log file as well.
 - **Manual redact:** a card in the main window takes a value, builds its variants (reordered, hyphenated, joined, parts) and replaces them in every output `.md`.
-- **Queue UI:** files or a folder go into a queue; Start runs `process_pdfs` on a `RedactionWorker` QThread. Rows with zero names turn amber for manual review.
+- **Queue UI:** files or a folder go into a queue; Start runs `process_pdfs` on a `RedactionWorker` QThread. Rows with zero names turn amber for manual review. So do "incomplete" rows, whose tooltip names the lost pages; Start runs them again.
 - **Output location:** a footer menu picks "beside originals" (each `.md` next to its PDF) or a chosen folder.
 - **UI language (HU default, EN):** strings live in `gui/i18n.py`, read through `t(key, **fmt)`; no Qt `.ts`/`tr()`. The header toggle calls `MainWindow._retranslate()`, which re-pushes every string without rebuilding the window. New UI text needs a key in both languages and, for a widget that stays on screen, a line in `_retranslate()`.
 - **Model downloader:** the header model chip opens `ModelsDialog`. `medical_redactor_onnx/download.py` streams each missing file to `.part`, checks its sha256 against `models_manifest.json` and renames it into place. Both models share one `base_url` on the `models-v1` release, so file names must be unique (the manifest script enforces this).
 - **New weights, new tag:** re-exported weights go to a new release tag (`models-v2`, ...) with a regenerated manifest. Never overwrite old assets: shipped app versions pin their manifest.
 - **Torch-free runtime:** the runtime installs `docling-slim` and `onnxruntime` only. Export scripts use a separate venv that may pull torch.
-- **Docling shims:** `install_docling_torch_free_shims()` turns off torch-based chart extraction, replaces the device resolver with CPU and adds small reading-order and list-item shims, so `docling-ibm-models` is never imported.
+- **Docling shims:** `install_docling_torch_free_shims()` turns off torch-based chart extraction, replaces the device resolver with CPU and adds small reading-order and list-item shims, so `docling-ibm-models` is never imported. That package declares torch as a required dependency, so it can never go into `requirements.txt`.
+- **Page order:** `_sort_top_to_bottom` in `register_docling.py` replaces Docling's reading order model. Docling gives bottom-left coordinates, so a larger `t` is higher on the page. Boxes that overlap by more than half of the taller one count as one row and read left to right. It has no column detection: two text columns read row by row.
+- **Partial conversions:** when a stage fails on some pages, Docling drops those pages and returns the rest as `PARTIAL_SUCCESS` with no exception. `convert_pdf_detailed` returns what is missing. `process_pdfs` saves the redacted rest, sends a `FileEvent` with stage `partial` and logs a warning. `convert_pdf` and `process_file` have no way to report this, so they raise `PartialConversionError`. If every page fails, Docling raises and the file counts as failed.
 - **Windows PDF backend:** on Windows the converter uses PDFium and passes the PDF as a stream, because docling-parse fails there on Unicode paths and on a missing glyph map.
 - **Lean releases:** bundles ship without models (about 700 MB instead of 1.4 GB). The app downloads them on first run; Docling fetches its own layout and OCR models into the Hugging Face cache.
 
@@ -97,6 +100,9 @@ Per file, in `process_file_detailed`:
 - **TableFormer is ours to maintain** until Docling ships an official torch-free table model. Validate on real lab tables before upgrading Docling.
 - **TableFormer bbox clamp is a deliberate upstream deviation.** `multi_table_predict` clamps table boxes to the page and skips degenerate ones, because a slightly out-of-page box makes `cv2.resize` abort the whole page. Keep it when re-syncing with upstream.
 - **TableFormer preprocessing is load-bearing.** `_prepare_image` must transpose to (channels, width, height), the orientation upstream trained on; (C, H, W) merges rows. Keep `do_cell_matching=True`: cell matching snaps predicted cells to the PDF text, and without it lab reports lose most of their table content.
+- **A failed table step loses whole pages,** not only their tables. It also takes every page in the same batch: with Docling's default `table_batch_size` of 4, one bad page can cost four.
+- **`_NER_MIN_SCORE` was tuned while pages read bottom to top.** Name model scores shift with the surrounding text. Re-run the private corpus check (`MEDICAL_REDACTOR_TEST_PDF_DIR`, see `tests/test_real_docs_optional.py`) before relying on the threshold.
+- **Test order:** `test_register_onnx_tableformer_replaces_docling_default` needs the shims not yet installed. It passes in the default file order, but fails if a file that builds a converter runs before it.
 - **Vendored modules:** `medical_redactor_onnx/vendor/` holds four files from docling-ibm-models 3.13.2 with only the import paths changed. Re-sync them when you regenerate the ONNX files against a newer upstream.
 - **HuBERT ONNX is fp32,** not quantized, so the NER model is still hundreds of MB. Per-table ONNX CPU inference can be slower than torch CPU.
 - **GPU VRAM:** the development machine's GPU also drives the display. Check free VRAM before starting any persistent GPU server (llama-server, vLLM); starving the compositor gives a black screen that needs a hard reboot.
