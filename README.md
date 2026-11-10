@@ -1,14 +1,10 @@
 # Orvosi dokumentum anonimizáló
 
-Asztali alkalmazás, ami magyar orvosi PDF-leleteket alakít kitakart markdown szöveggé. A személyes adatokat (nevek, TAJ-szám, lakcím, telefonszám, e-mail, születési dátum) eltávolítja, a vizsgálati dátumok és az orvosi tartalom marad.
+Asztali alkalmazás, ami magyar orvosi PDF-leletekből Markdown szöveget készít, a személyes adatok nélkül. Az így kapott szöveget odaadhatod egy nyelvi modellnek (LLM), hogy összefoglalja vagy elmagyarázza a leleteidet.
 
-![Az alkalmazás három feldolgozott lelettel](screenshots/app.png)
+[![Bemutató videó: kattints a lejátszáshoz](screenshots/video.jpg)](https://github.com/Tokra110/orvosi-dokumentum-anonimizalo/releases/download/v1.0.0/medical-redactor-demo.mp4)
 
-![Az eredeti PDF és a kitakart Markdown egymás mellett](screenshots/result.png)
-
-A képeken és a [bemutató videóban](https://github.com/Tokra110/orvosi-dokumentum-anonimizalo/releases/download/v1.0.0/medical-redactor-demo.mp4) minden név, szám és cím kitalált.
-
-Letöltés Windowsra és Linuxra: [Releases](https://github.com/Tokra110/orvosi-dokumentum-anonimizalo/releases/latest). A modelleket (kb. 655 MB) az első indításkor tölti le.
+*Bemutató videó, kb. 40 másodperc, hanggal. A videóban és a képeken minden név, szám és cím kitalált.*
 
 ## Miért készült?
 
@@ -16,12 +12,42 @@ Abból jött az egész, hogy a leleteimet be akartam adni egy nyelvi modellnek: 
 
 Minden a saját gépeden fut, CPU-n (ONNX Runtime, se PyTorch, se felhő). A dokumentumaid nem hagyják el a géped.
 
+## Mit vesz ki, és mit hagy meg?
+
+| Kiveszi | Megtartja |
+|---|---|
+| Nevek: beteg, hozzátartozó, orvos | Vizsgálati dátumok |
+| TAJ-szám, születési dátum | Laborértékek, mértékegységek, referenciatartományok |
+| Lakcím, telefonszám, e-mail | A táblázatok szerkezete |
+| Orvosi pecsétszám, naplószám, más azonosítók | Leletek, vélemények, diagnózisok (BNO-kóddal) |
+| Intézmények neve és címe | |
+| Ugyanezeket a fájlnévből is | |
+
+A kivett adat helyére típusjelölt helyőrző kerül, például `[REDACTED_NAME]` vagy `[REDACTED_TAJ]`, így látszik, mi volt ott.
+
+![Egy kitalált laborlelet és a belőle készült Markdown egymás mellett. Ami kikerül, sárga keretet kap.](screenshots/result.png)
+
+## Az alkalmazás
+
+PDF-eket vagy egész mappát húzhatsz be, az Indítás gomb pedig sorban feldolgozza őket. A táblázat fájlonként mutatja, hány nevet, TAJ-számot, dátumot és címet takart ki. Ha egy nevet a program nem talált meg, a Kézi anonimizálás résznél minden kész fájlban kicserélheted.
+
+![Az alkalmazás ablaka három feldolgozott kitalált lelettel](screenshots/app.png)
+
+## Letöltés
+
+A [legújabb kiadásnál](https://github.com/Tokra110/orvosi-dokumentum-anonimizalo/releases/latest):
+
+- Windows: `*-setup.exe` (telepítő) vagy `*-windows-x86_64.zip` (telepítés nélkül)
+- Linux: `*.rpm` (Fedora és társai) vagy `*-linux-x86_64.tar.gz`
+
+Az első indításkor a program letölti a modelleket, ez kb. 655 MB.
+
 ## Hogyan működik?
 
-1. A PDF-et a [Docling](https://github.com/docling-project/docling) alakítja markdownná. A laboreredmény-táblázatok szerkezete megmarad.
+1. A PDF-et a [Docling](https://github.com/docling-project/docling) alakítja Markdownná. A laboreredmény-táblázatok szerkezete megmarad.
 2. Egy magyar HuBERT NER-modell megkeresi a neveket, helyeket, intézményeket.
-3. Magyar-specifikus szabályok szűrik a TAJ-számot (ellenőrzőösszeggel), a telefonszámokat, címeket, születési dátumokat és a mezőcímkék melletti neveket.
-4. Minden találat típusjelölt helyettesítőt kap (`[REDACTED_NAME]`, `[REDACTED_TAJ]`, ...), a fájlnevekben is.
+3. Magyar szabályok keresik a TAJ-számot (ellenőrzőösszeggel), a telefonszámokat, címeket, születési dátumokat és a mezőcímkék melletti neveket.
+4. Minden találat a helyőrzőjére cserélődik, a fájlnévben is.
 
 > Csak EESZT-ből letöltött dokumentumokkal teszteltem: labor, ambuláns lap, képalkotó leletek. Más forrásból jövő PDF (magánklinika saját sablonja, papírról szkennelt lelet) működhet, de nincs validálva. Ilyenkor különösen alaposan nézd át az eredményt.
 
@@ -31,7 +57,9 @@ Minden a saját gépeden fut, CPU-n (ONNX Runtime, se PyTorch, se felhő). A dok
 
 # Technical documentation (English)
 
-Desktop app (PySide6) that converts Hungarian medical PDFs to redacted markdown. PII detection runs in two layers: a Hungarian HuBERT NER model (ONNX) plus Hungarian-specific regexes. Inference is local, CPU-only, torch-free.
+Desktop app (PySide6) that turns Hungarian medical PDFs into Markdown with the personal data removed, so the text can go to an LLM for a summary or an explanation. PII detection runs in two layers: a Hungarian HuBERT NER model (ONNX) plus Hungarian-specific regexes. Inference is local, CPU-only, torch-free. The [demo video](https://github.com/Tokra110/orvosi-dokumentum-anonimizalo/releases/download/v1.0.0/medical-redactor-demo.mp4) shows a run on invented documents.
+
+It removes names (patients, relatives, doctors), TAJ numbers, birth dates, addresses, phone numbers, e-mail addresses, doctor stamp numbers, record IDs and institution names, also from file names. It keeps examination dates, lab values with units and reference ranges, table structure, findings and diagnoses.
 
 The app works and has tests, but treat it as a work in progress. The app downloads its HuBERT and TableFormer ONNX models from the public `models-v1` GitHub Release on first use. Validation so far covers EESZT documents only (see the Hungarian note above).
 
