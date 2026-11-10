@@ -4,7 +4,7 @@ How the redactor works and why. The brief is `AGENTS.md`. There is no session lo
 
 ## Repository
 
-- Public GitHub repo `Tokra110/orvosi-dokumentum-anonimizalo`. The app downloads its models from this repo's releases, so it must stay public or the downloader breaks.
+- Public GitHub repo `Tokra110/hungarian-medical-redactor`. The app downloads its models from this repo's releases, so it must stay public or the downloader breaks.
 - Commits use the anonymous identity in the repo's local git config (`Medical Redactor contributors`). Keep it, so no personal name enters the public history.
 - Push, tag or publish a model release only when the maintainer asks. Pushing a `v*` tag runs `release.yml`, which publishes a GitHub Release.
 
