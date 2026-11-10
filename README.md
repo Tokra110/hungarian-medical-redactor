@@ -4,8 +4,6 @@ Asztali alkalmazás, ami magyar orvosi PDF-leletekből Markdown szöveget kész�
 
 https://github.com/user-attachments/assets/839b6336-1361-49dd-8be2-4f3e9fdba649
 
-*Bemutató videó, kb. 40 másodperc. A hang a hangszóró ikonnal kapcsolható be. A videóban és a képeken minden név, szám és cím kitalált.*
-
 ## Miért készült?
 
 Abból jött az egész, hogy a leleteimet be akartam adni egy nyelvi modellnek: foglalja össze, magyarázza el, lehessen kérdezgetni. Csak épp a személyes adataimat nem akartam feltölteni sehova. Ez a program ezért előbb helyben kitakarja a dokumentumot, és csak a már anonimizált szöveg megy tovább.
@@ -23,13 +21,11 @@ Minden a saját gépeden fut, CPU-n (ONNX Runtime, se PyTorch, se felhő). A dok
 | Intézmények neve és címe | |
 | Ugyanezeket a fájlnévből is | |
 
-A kivett adat helyére típusjelölt helyőrző kerül, például `[REDACTED_NAME]` vagy `[REDACTED_TAJ]`, így látszik, mi volt ott.
-
 ![Egy kitalált laborlelet és a belőle készült Markdown egymás mellett. Ami kikerül, sárga keretet kap.](screenshots/result.png)
 
 ## Az alkalmazás
 
-PDF-eket vagy egész mappát húzhatsz be, az Indítás gomb pedig sorban feldolgozza őket. A táblázat fájlonként mutatja, hány nevet, TAJ-számot, dátumot és címet takart ki. Ha egy nevet a program nem talált meg, a Kézi anonimizálás résznél minden kész fájlban kicserélheted.
+Ha a program egy nevet nem talált meg, a Kézi anonimizálás résznél minden kész fájlban kicserélheted.
 
 ![Az alkalmazás ablaka három feldolgozott kitalált lelettel](screenshots/app.png)
 
@@ -44,10 +40,10 @@ Az első indításkor a program letölti a modelleket, ez kb. 655 MB.
 
 ## Hogyan működik?
 
-1. A PDF-et a [Docling](https://github.com/docling-project/docling) alakítja Markdownná. A laboreredmény-táblázatok szerkezete megmarad.
+1. A PDF-et a [Docling](https://github.com/docling-project/docling) alakítja Markdownná.
 2. Egy magyar HuBERT NER-modell megkeresi a neveket, helyeket, intézményeket.
 3. Magyar szabályok keresik a TAJ-számot (ellenőrzőösszeggel), a telefonszámokat, címeket, születési dátumokat és a mezőcímkék melletti neveket.
-4. Minden találat a helyőrzőjére cserélődik, a fájlnévben is.
+4. Minden találat típusjelölt helyőrzőt kap (`[REDACTED_NAME]`, `[REDACTED_TAJ]`, ...), a fájlnévben is.
 
 > Csak EESZT-ből letöltött dokumentumokkal teszteltem: labor, ambuláns lap, képalkotó leletek. Más forrásból jövő PDF (magánklinika saját sablonja, papírról szkennelt lelet) működhet, de nincs validálva. Ilyenkor különösen alaposan nézd át az eredményt.
 
@@ -57,7 +53,7 @@ Az első indításkor a program letölti a modelleket, ez kb. 655 MB.
 
 # Technical documentation (English)
 
-Desktop app (PySide6) that turns Hungarian medical PDFs into Markdown with the personal data removed, so the text can go to an LLM for a summary or an explanation. PII detection runs in two layers: a Hungarian HuBERT NER model (ONNX) plus Hungarian-specific regexes. Inference is local, CPU-only, torch-free. The demo video at the top of this page shows a run on invented documents.
+Desktop app (PySide6) that turns Hungarian medical PDFs into Markdown with the personal data removed, so the text can go to an LLM for a summary or an explanation. PII detection runs in two layers: a Hungarian HuBERT NER model (ONNX) plus Hungarian-specific regexes. Inference is local, CPU-only, torch-free.
 
 It removes names (patients, relatives, doctors), TAJ numbers, birth dates, addresses, phone numbers, e-mail addresses, doctor stamp numbers, record IDs and institution names, also from file names. It keeps examination dates, lab values with units and reference ranges, table structure, findings and diagnoses.
 
