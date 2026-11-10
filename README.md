@@ -2,6 +2,14 @@
 
 Asztali alkalmazás, ami magyar orvosi PDF-leleteket alakít kitakart markdown szöveggé. A személyes adatokat (nevek, TAJ-szám, lakcím, telefonszám, e-mail, születési dátum) eltávolítja, a vizsgálati dátumok és az orvosi tartalom marad.
 
+![Az alkalmazás három feldolgozott lelettel](screenshots/app.png)
+
+![Az eredeti PDF és a kitakart Markdown egymás mellett](screenshots/result.png)
+
+A képeken és a [bemutató videóban](https://github.com/Tokra110/orvosi-dokumentum-anonimizalo/releases/download/v1.0.0/medical-redactor-demo.mp4) minden név, szám és cím kitalált.
+
+Letöltés Windowsra és Linuxra: [Releases](https://github.com/Tokra110/orvosi-dokumentum-anonimizalo/releases/latest). A modelleket (kb. 655 MB) az első indításkor tölti le.
+
 ## Miért készült?
 
 Abból jött az egész, hogy a leleteimet be akartam adni egy nyelvi modellnek: foglalja össze, magyarázza el, lehessen kérdezgetni. Csak épp a személyes adataimat nem akartam feltölteni sehova. Ez a program ezért előbb helyben kitakarja a dokumentumot, és csak a már anonimizált szöveg megy tovább.
@@ -56,7 +64,7 @@ python scripts/export_tableformer_onnx.py
 
 `packaging/` holds the PyInstaller, RPM, and Inno Setup definitions. `.github/workflows/release.yml` builds Linux (tar.gz + rpm) and Windows artifacts on version tags. Windows users can choose the standard per-user installer (`*-setup.exe`) or a portable zip. The installer adds a Start menu shortcut, supports normal Windows uninstall, and optionally creates a desktop shortcut. Bundles ship without models; the in-app downloader fetches them on first run. On Windows, downloaded models and diagnostic logs live beside the installed executable under `models\` and `logs\`. During uninstall, the user is asked whether downloaded models should also be removed; removal is selected by default, while choosing No keeps them for a later reinstall. Diagnostic logs are retained. Versions installed before 0.1.4 automatically move existing models from the previous per-user data directory.
 
-Before publishing, the Windows release gate installs the candidate, downloads and hashes the real HuBERT and TableFormer models, starts from an empty Docling cache, processes a vector PDF with a table and an image-only OCR PDF, checks the redacted contents and filenames, opens the real Qt window, then upgrades the previous published installer and repeats the verification while confirming that models and logs survived. A manual workflow run performs the same Windows check without publishing anything.
+Before publishing, the Windows release gate installs the candidate, downloads and hashes the real HuBERT and TableFormer models, starts from an empty Docling cache, processes a vector PDF with a table and an image-only OCR PDF, checks the redacted contents and filenames, opens the real Qt window, then upgrades the newest published installer and repeats the verification while confirming that models and logs survived. The first app release had no earlier installer, so it skipped only that upgrade step. A manual workflow run performs the same Windows check without publishing anything.
 
 ## Model attribution
 
