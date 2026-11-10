@@ -2,9 +2,9 @@
 
 Asztali alkalmazás, ami magyar orvosi PDF-leletekből Markdown szöveget készít, a személyes adatok nélkül. Az így kapott szöveget odaadhatod egy nyelvi modellnek (LLM), hogy összefoglalja vagy elmagyarázza a leleteidet.
 
-[![Bemutató videó: kattints a lejátszáshoz](screenshots/video.jpg)](https://github.com/Tokra110/hungarian-medical-redactor/releases/download/v1.0.0/medical-redactor-demo.mp4)
+https://github.com/user-attachments/assets/839b6336-1361-49dd-8be2-4f3e9fdba649
 
-*Bemutató videó, kb. 40 másodperc, hanggal. A videóban és a képeken minden név, szám és cím kitalált.*
+*Bemutató videó, kb. 40 másodperc. A hang a hangszóró ikonnal kapcsolható be. A videóban és a képeken minden név, szám és cím kitalált.*
 
 ## Miért készült?
 
@@ -57,7 +57,7 @@ Az első indításkor a program letölti a modelleket, ez kb. 655 MB.
 
 # Technical documentation (English)
 
-Desktop app (PySide6) that turns Hungarian medical PDFs into Markdown with the personal data removed, so the text can go to an LLM for a summary or an explanation. PII detection runs in two layers: a Hungarian HuBERT NER model (ONNX) plus Hungarian-specific regexes. Inference is local, CPU-only, torch-free. The [demo video](https://github.com/Tokra110/hungarian-medical-redactor/releases/download/v1.0.0/medical-redactor-demo.mp4) shows a run on invented documents.
+Desktop app (PySide6) that turns Hungarian medical PDFs into Markdown with the personal data removed, so the text can go to an LLM for a summary or an explanation. PII detection runs in two layers: a Hungarian HuBERT NER model (ONNX) plus Hungarian-specific regexes. Inference is local, CPU-only, torch-free. The demo video at the top of this page shows a run on invented documents.
 
 It removes names (patients, relatives, doctors), TAJ numbers, birth dates, addresses, phone numbers, e-mail addresses, doctor stamp numbers, record IDs and institution names, also from file names. It keeps examination dates, lab values with units and reference ranges, table structure, findings and diagnoses.
 
