@@ -175,6 +175,13 @@ def test_process_pdfs_saves_and_flags_a_partial_conversion(tmp_path, monkeypatch
     assert "[REDACTED_" in saved
     assert "Teszt Elek" not in saved
 
+    # The file itself says which pages are missing, ahead of the content.
+    first_line, rest = saved.split("\n\n", 1)
+    assert first_line.startswith("> **Figyelem: hiányos átalakítás.**")
+    assert "2. és 3. oldala hiányzik" in first_line
+    assert "[REDACTED_" not in first_line
+    assert "Figyelem" not in rest
+
 
 def test_complete_conversion_has_no_error_text(tmp_path, monkeypatch):
     from conftest import FakeConverter
@@ -183,6 +190,8 @@ def test_complete_conversion_has_no_error_text(tmp_path, monkeypatch):
 
     assert events[-1].stage == "done"
     assert events[-1].error is None
+    saved = (tmp_path / "out" / events[-1].output_name).read_text(encoding="utf-8")
+    assert not saved.startswith(">")
 
 
 def test_log_warns_about_a_partial_conversion_and_counts_it(tmp_path, monkeypatch):
@@ -221,3 +230,32 @@ def test_partial_conversion_reaches_the_queue_row(qapp, tmp_path, monkeypatch):
 
     assert queue.data(queue.index(0, 1), Qt.DisplayRole) == "Incomplete"
     assert "Page 2: invented failure" in queue.data(queue.index(0, 1), Qt.ToolTipRole)
+
+
+def test_partial_output_note_names_the_lost_pages_in_the_app_language(monkeypatch):
+    from gui import i18n
+
+    monkeypatch.setattr(i18n, "_lang", "hu")
+    one = redactor.partial_output_note(["Page 4: invented failure"])
+    assert "PDF 4. oldala hiányzik" in one
+    many = redactor.partial_output_note(
+        ["Page 5: x", "Page 2: x", "Page 3: x", "Page 2: y"]
+    )
+    assert "PDF 2., 3. és 5. oldala hiányzik" in many
+
+    monkeypatch.setattr(i18n, "_lang", "en")
+    assert "Page 4 of the original PDF is missing" in redactor.partial_output_note(
+        ["Page 4: invented failure"]
+    )
+    assert "Pages 2, 3 and 5 of the original PDF are missing" in redactor.partial_output_note(
+        ["Page 2: x", "Page 3: x", "Page 5: x"]
+    )
+
+
+def test_partial_output_note_without_page_numbers_still_warns(monkeypatch):
+    from gui import i18n
+
+    monkeypatch.setattr(i18n, "_lang", "en")
+    note = redactor.partial_output_note(["Docling status: partial_success"])
+    assert note.startswith("> **Warning: incomplete conversion.**")
+    assert "Parts of the original PDF are missing" in note

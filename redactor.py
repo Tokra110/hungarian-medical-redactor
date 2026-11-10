@@ -707,6 +707,41 @@ def _conversion_problems(result) -> list[str]:
     ]
 
 
+_LOST_PAGE = re.compile(r"^Page (\d+):")
+
+
+def _lost_page_numbers(problems: list[str]) -> list[int]:
+    """The page numbers that Docling names in its errors, in order."""
+    pages = {int(m.group(1)) for p in problems if (m := _LOST_PAGE.match(p))}
+    return sorted(pages)
+
+
+def _join_numbers(numbers: list[int], suffix: str, last_joiner: str) -> str:
+    items = [f"{n}{suffix}" for n in numbers]
+    if len(items) == 1:
+        return items[0]
+    return f"{', '.join(items[:-1])} {last_joiner} {items[-1]}"
+
+
+def partial_output_note(problems: list[str]) -> str:
+    """The warning at the top of a saved file that has pages missing.
+
+    It is added after redaction, so the redaction rules never read it, and it
+    uses the app language, as the file is read later away from the window.
+    """
+    from gui.i18n import get_language, t
+
+    pages = _lost_page_numbers(problems)
+    if not pages:
+        return t("partial_file_note_unknown")
+    if get_language() == "hu":
+        numbers = _join_numbers(pages, ".", "és")
+    else:
+        numbers = _join_numbers(pages, "", "and")
+    key = "partial_file_note_one" if len(pages) == 1 else "partial_file_note_many"
+    return t(key, pages=numbers)
+
+
 def convert_pdf(pdf_path: str, converter) -> str:
     """The Markdown of a complete conversion. Raises PartialConversionError if not."""
     markdown, problems = convert_pdf_detailed(pdf_path, converter)
@@ -786,6 +821,10 @@ def build_docling_converter():
         create_orphan_clusters=True,
     )
     pipeline_options.ocr_options = RapidOcrOptions(backend="onnxruntime", lang=["english"])
+    # When the table step fails, Docling drops every page in that batch, not
+    # only the failed one. With Docling's default of 4, one bad page cost four.
+    # The ONNX table model works page by page anyway, so 1 is no slower.
+    pipeline_options.table_batch_size = 1
 
     if _is_windows():
         _preflight_windows_hf_cache(pipeline_options.layout_options)
@@ -1028,6 +1067,8 @@ def process_pdfs(
                 out_file = out_dir / f"{base} ({counter}).md"
                 counter += 1
             used_names.add(out_file)
+            if problems:
+                redacted = f"{partial_output_note(problems)}\n\n{redacted}"
             out_file.write_text(redacted, encoding="utf-8")
             if problems:
                 incomplete += 1

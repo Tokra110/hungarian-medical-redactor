@@ -336,6 +336,43 @@ _STRINGS: dict[str, dict[str, str]] = {
             "original PDF or run it again.\n{detail}"
         ),
     },
+    # Written at the top of a saved file that has pages missing.
+    "partial_file_note_one": {
+        "hu": (
+            "> **Figyelem: hiányos átalakítás.** Az eredeti PDF {pages} oldala "
+            "hiányzik ebből a fájlból, mert nem sikerült feldolgozni. Vesd össze "
+            "az eredeti PDF-fel."
+        ),
+        "en": (
+            "> **Warning: incomplete conversion.** Page {pages} of the original PDF "
+            "is missing from this file because it could not be processed. Compare "
+            "it with the original PDF."
+        ),
+    },
+    "partial_file_note_many": {
+        "hu": (
+            "> **Figyelem: hiányos átalakítás.** Az eredeti PDF {pages} oldala "
+            "hiányzik ebből a fájlból, mert nem sikerült feldolgozni őket. Vesd "
+            "össze az eredeti PDF-fel."
+        ),
+        "en": (
+            "> **Warning: incomplete conversion.** Pages {pages} of the original "
+            "PDF are missing from this file because they could not be processed. "
+            "Compare it with the original PDF."
+        ),
+    },
+    "partial_file_note_unknown": {
+        "hu": (
+            "> **Figyelem: hiányos átalakítás.** Az eredeti PDF egyes részei "
+            "hiányoznak ebből a fájlból, mert nem sikerült feldolgozni őket. Vesd "
+            "össze az eredeti PDF-fel."
+        ),
+        "en": (
+            "> **Warning: incomplete conversion.** Parts of the original PDF are "
+            "missing from this file because they could not be processed. Compare "
+            "it with the original PDF."
+        ),
+    },
     "status_failed": {"hu": "Hiba", "en": "Failed"},
     "zero_names": {"hu": "0 név", "en": "0 names"},
     # --- models dialog ---

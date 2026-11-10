@@ -202,7 +202,6 @@ def test_failed_table_step_is_reported_as_partial(tmp_path, monkeypatch):
     # The real pipeline, with the table step failing on page 2 of an invented PDF.
     # Docling then drops the whole page and returns the rest with no exception.
     import pytest
-    from docling.datamodel.base_models import InputFormat
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
 
@@ -226,8 +225,6 @@ def test_failed_table_step_is_reported_as_partial(tmp_path, monkeypatch):
 
     monkeypatch.setattr(OnnxTableStructureModel, "predict_tables", fail_on_page_two)
     converter = redactor.build_docling_converter()
-    # One page per batch, so that page 1 is sure to survive.
-    converter.format_to_options[InputFormat.PDF].pipeline_options.table_batch_size = 1
 
     markdown, problems = redactor.convert_pdf_detailed(str(pdf), converter)
 
@@ -236,3 +233,36 @@ def test_failed_table_step_is_reported_as_partial(tmp_path, monkeypatch):
     assert problems == ["Page 2: invented table failure"]
     with pytest.raises(redactor.PartialConversionError, match="Page 2"):
         redactor.convert_pdf(str(pdf), converter)
+
+
+def test_failed_table_page_loses_only_that_page(tmp_path, monkeypatch):
+    # Docling drops every page in a failed table batch. Its default batch of 4
+    # lost pages 2 to 5 of this invented PDF for one failure on page 2.
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    import redactor
+    from medical_redactor_onnx.docling_table_model import OnnxTableStructureModel
+
+    pdf = tmp_path / "hat-oldal.pdf"
+    pdf_canvas = canvas.Canvas(str(pdf), pagesize=A4)
+    for page in range(1, 7):
+        pdf_canvas.drawString(60, 760, f"Oldal {page} szovege.")
+        pdf_canvas.showPage()
+    pdf_canvas.save()
+
+    real_predict_tables = OnnxTableStructureModel.predict_tables
+
+    def fail_on_page_two(self, conv_res, pages):
+        if any(page.page_no == 2 for page in pages):
+            raise RuntimeError("invented table failure")
+        return real_predict_tables(self, conv_res, pages)
+
+    monkeypatch.setattr(OnnxTableStructureModel, "predict_tables", fail_on_page_two)
+    converter = redactor.build_docling_converter()
+
+    markdown, problems = redactor.convert_pdf_detailed(str(pdf), converter)
+
+    kept = [page for page in range(1, 7) if f"Oldal {page} " in markdown]
+    assert kept == [1, 3, 4, 5, 6]
+    assert problems == ["Page 2: invented table failure"]

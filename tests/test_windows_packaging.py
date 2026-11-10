@@ -100,7 +100,8 @@ def test_windows_installer_verifier_covers_fresh_install_and_real_upgrade():
     script = verifier.read_text()
     assert "--release-verify" in script
     assert "fresh-install" in script
-    assert "releases/latest" in script
+    assert "releases?per_page=100" in script
+    assert "-not $_.prerelease" in script
     assert "*-setup.exe" in script
     assert "release-verification.json" in script
     assert r"_internal\stale-runtime-file.txt" in script

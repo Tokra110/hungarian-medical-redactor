@@ -116,6 +116,9 @@ function Install-Silently {
 
 
 function Get-PreviousInstaller {
+    # Returns $false when no published release has an installer yet (the first
+    # app release). "releases/latest" is not used: it can be a models-only
+    # release, such as models-v1, that has no installer.
     param(
         [Parameter(Mandatory = $true)]
         [string]$Repo,
@@ -132,14 +135,18 @@ function Get-PreviousInstaller {
         $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)"
     }
 
-    $release = Invoke-RestMethod `
-        -Uri "https://api.github.com/repos/$Repo/releases/latest" `
+    # Newest first. A tag run is not published yet, so it is not in this list.
+    $releases = Invoke-RestMethod `
+        -Uri "https://api.github.com/repos/$Repo/releases?per_page=100" `
         -Headers $headers
-    $asset = $release.assets |
+    $asset = $releases |
+        Where-Object { -not $_.draft -and -not $_.prerelease } |
+        ForEach-Object { $_.assets } |
         Where-Object { $_.name -like "*-setup.exe" } |
         Select-Object -First 1
     if (-not $asset) {
-        throw "The latest published release has no *-setup.exe asset"
+        Write-Host "No published release has a *-setup.exe asset yet: first app release"
+        return $false
     }
 
     Write-Host "Downloading previous installer $($asset.name)"
@@ -147,6 +154,7 @@ function Get-PreviousInstaller {
         -Uri $asset.browser_download_url `
         -Headers $headers `
         -OutFile $Destination
+    return $true
 }
 
 
@@ -181,32 +189,45 @@ Invoke-CheckedProcess `
 
 # Install the previously published version, add real models plus preservation
 # sentinels, then install the candidate over it at the normal per-user path.
+# The first app release has no previous version: it then installs the candidate
+# at the normal path and checks it there, and only the upgrade checks are skipped.
 $previousInstaller = Join-Path $root "previous-windows-setup.exe"
-Get-PreviousInstaller -Repo $Repository -Destination $previousInstaller
-Install-Silently -Installer $previousInstaller
+$hasPrevious = Get-PreviousInstaller -Repo $Repository -Destination $previousInstaller
 
 $defaultInstall = Join-Path $env:LOCALAPPDATA "Programs\Medical Redactor"
 $modelsDir = Join-Path $defaultInstall "models"
 $logsDir = Join-Path $defaultInstall "logs"
 $staleRuntime = Join-Path $defaultInstall "_internal\stale-runtime-file.txt"
-New-Item -ItemType Directory -Force $modelsDir | Out-Null
-New-Item -ItemType Directory -Force $logsDir | Out-Null
-New-Item -ItemType Directory -Force (Split-Path $staleRuntime) | Out-Null
-Copy-Item -Path (Join-Path $verifiedModels "*") -Destination $modelsDir -Recurse -Force
-Set-Content (Join-Path $modelsDir "preserve-models.txt") "preserve models"
-Set-Content (Join-Path $logsDir "preserve-logs.txt") "preserve logs"
-Set-Content $staleRuntime "old runtime"
+
+if ($hasPrevious) {
+    Install-Silently -Installer $previousInstaller
+    New-Item -ItemType Directory -Force $modelsDir | Out-Null
+    New-Item -ItemType Directory -Force $logsDir | Out-Null
+    New-Item -ItemType Directory -Force (Split-Path $staleRuntime) | Out-Null
+    Copy-Item -Path (Join-Path $verifiedModels "*") -Destination $modelsDir -Recurse -Force
+    Set-Content (Join-Path $modelsDir "preserve-models.txt") "preserve models"
+    Set-Content (Join-Path $logsDir "preserve-logs.txt") "preserve logs"
+    Set-Content $staleRuntime "old runtime"
+}
 
 Install-Silently -Installer $candidate
 
-if (Test-Path $staleRuntime) {
-    throw "Candidate upgrade did not replace the previous _internal runtime tree"
+if ($hasPrevious) {
+    if (Test-Path $staleRuntime) {
+        throw "Candidate upgrade did not replace the previous _internal runtime tree"
+    }
+    if (-not (Test-Path (Join-Path $modelsDir "preserve-models.txt"))) {
+        throw "Candidate upgrade removed the existing models directory"
+    }
+    if (-not (Test-Path (Join-Path $logsDir "preserve-logs.txt"))) {
+        throw "Candidate upgrade removed the existing logs directory"
+    }
 }
-if (-not (Test-Path (Join-Path $modelsDir "preserve-models.txt"))) {
-    throw "Candidate upgrade removed the existing models directory"
-}
-if (-not (Test-Path (Join-Path $logsDir "preserve-logs.txt"))) {
-    throw "Candidate upgrade removed the existing logs directory"
+else {
+    New-Item -ItemType Directory -Force $modelsDir | Out-Null
+    New-Item -ItemType Directory -Force $logsDir | Out-Null
+    Copy-Item -Path (Join-Path $verifiedModels "*") -Destination $modelsDir -Recurse -Force
+    Set-Content (Join-Path $logsDir "preserve-logs.txt") "preserve logs"
 }
 
 Invoke-InstalledVerification `
